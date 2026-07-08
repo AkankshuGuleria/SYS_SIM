@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CPU Scheduling Studio</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <canvas id="system-depth-canvas" aria-hidden="true"></canvas>
+
+    <header class="app-header hero-header">
+        <div class="header-logo">
+            <span class="logo-icon">CPU</span>
+            <div class="logo-text">
+                <h1>CPU Scheduling Studio</h1>
+                <p>Live process scheduling visualizer powered by the C++ engine</p>
+            </div>
+        </div>
+        <div class="header-status">
+            <span class="status-indicator connected"></span>
+            <span class="status-label">Engine Online</span>
+        </div>
+    </header>
+
+    <main class="app-content showpiece-content">
+        <section class="showcase-strip" aria-label="Simulation highlights">
+            <div>
+                <span class="strip-kicker">Judge Demo Mode</span>
+                <h2>Pick an algorithm, run the clock, and watch the CPU decide.</h2>
+            </div>
+            <div class="strip-metrics">
+                <span>7 Algorithms</span>
+                <span>Live Gantt</span>
+                <span>Fairness Metrics</span>
+            </div>
+        </section>
+
+        <section id="tab-simulator" class="tab-pane active">
+            <div class="simulator-layout">
+                <aside class="sim-config-sidebar">
+                    <div class="card config-card">
+                        <h2>Simulation Setup</h2>
+                        <div class="form-group">
+                            <label for="scenario-select">Demo Scenario</label>
+                            <select id="scenario-select">
+                                <option value="custom" selected>Custom / Manual Edit</option>
+                                <option value="convoy">Convoy Effect</option>
+                                <option value="preempt">Preemption Interruption</option>
+                                <option value="timeshare">Round Robin Fairness</option>
+                                <option value="priority">Priority Preemption</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="algorithm-select">Scheduling Algorithm</label>
+                            <select id="algorithm-select">
+                                <option value="FCFS">FCFS</option>
+                                <option value="SJF">SJF - Non-Preemptive</option>
+                                <option value="SRTF">SRTF - Preemptive</option>
+                                <option value="PRIORITY">Priority - Non-Preemptive</option>
+                                <option value="PRIORITY_PREEMPTIVE">Priority - Preemptive</option>
+                                <option value="RR" selected>Round Robin</option>
+                                <option value="MLFQ">MLFQ</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group" id="quantum-group">
+                            <label for="time-quantum">Time Quantum</label>
+                            <input type="number" id="time-quantum" min="1" max="20" value="2">
+                        </div>
+
+                        <div class="presets-group">
+                            <label>Fast Demo Data</label>
+                            <div class="presets-buttons">
+                                <button type="button" class="btn btn-secondary btn-sm" id="preset-simple">Balanced</button>
+                                <button type="button" class="btn btn-secondary btn-sm" id="preset-preemptive">Preemptive</button>
+                                <button type="button" class="btn btn-secondary btn-sm" id="preset-starve">Starvation</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card process-editor-card">
+                        <div class="card-header-actions">
+                            <h2>Process Queue</h2>
+                            <button type="button" class="btn btn-primary btn-sm" id="btn-add-process">+ Add</button>
+                        </div>
+                        <div class="process-table-wrapper">
+                            <table id="process-editor-table">
+                                <thead>
+                                    <tr>
+                                        <th>PID</th>
+                                        <th>Arrival</th>
+                                        <th>Burst</th>
+                                        <th>Priority</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="process-list-body"></tbody>
+                            </table>
+                        </div>
+                        <div class="process-actions-footer">
+                            <button type="button" class="btn btn-danger btn-sm" id="btn-clear-processes">Clear</button>
+                            <button type="button" class="btn btn-secondary btn-sm" id="btn-reset-original">Defaults</button>
+                        </div>
+                    </div>
+                </aside>
+
+                <div class="sim-visualizer-board">
+                    <div class="card simulation-control-card">
+                        <div class="sim-controls">
+                            <button class="btn btn-success" id="btn-run-sim">Run</button>
+                            <button class="btn btn-warning" id="btn-pause-sim" disabled>Pause</button>
+                            <button class="btn btn-info" id="btn-step-sim" disabled>Step</button>
+                            <button class="btn btn-danger" id="btn-reset-sim">Reset</button>
+                            <div class="speed-slider-group">
+                                <label for="speed-slider">Speed <span id="speed-label">500</span>ms</label>
+                                <input type="range" id="speed-slider" min="50" max="1500" step="50" value="500">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card scenario-guide-card hidden" id="scenario-guide-card">
+                        <div class="scenario-guide-content">
+                            <h3><span id="scenario-title">Convoy Effect</span></h3>
+                            <p id="scenario-description">Description text here.</p>
+                            <div class="scenario-steps-box">
+                                <strong>Try next:</strong> <span id="scenario-tip">Compare with SJF.</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card visualizer-screen">
+                        <div class="screen-header">
+                            <div class="clock-display">
+                                <span class="clock-label">SYSTEM CLOCK</span>
+                                <span class="clock-time" id="clock-ticks">t = 0</span>
+                            </div>
+                            <div class="algo-badge" id="current-algo-badge">Round Robin</div>
+                        </div>
+
+                        <div class="screen-panels">
+                            <div class="top-row-panels">
+                                <div class="panel cpu-panel">
+                                    <h3>Current CPU</h3>
+                                    <div class="cpu-display-box" id="cpu-box">
+                                        <div class="cpu-idle-label">CPU IDLE</div>
+                                    </div>
+                                </div>
+
+                                <div class="panel queues-panel">
+                                    <div class="queue-section">
+                                        <h3>Ready Queue</h3>
+                                        <div class="queue-chain" id="ready-queue-chain">
+                                            <span class="empty-placeholder">(empty)</span>
+                                        </div>
+                                    </div>
+                                    <div class="queue-section">
+                                        <h3>Waiting Queue</h3>
+                                        <div class="queue-chain waiting" id="waiting-queue-chain">
+                                            <span class="empty-placeholder">(empty)</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="panel states-panel">
+                                <h3>Process States</h3>
+                                <div class="states-grid" id="states-grid"></div>
+                            </div>
+
+                            <div class="bottom-row-panels">
+                                <div class="panel decision-log-panel">
+                                    <h3>Scheduler Decision</h3>
+                                    <div class="decision-box" id="decision-log-box">
+                                        <div class="decision-reason">No simulation active. Press Run to start.</div>
+                                    </div>
+                                </div>
+                                <div class="panel live-gantt-panel">
+                                    <h3>Live Gantt Chart</h3>
+                                    <div class="gantt-chart-container" id="gantt-chart-row">
+                                        <span class="empty-placeholder">Gantt chart will build here tick-by-tick.</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card results-card hidden" id="performance-results-section">
+                        <h2>Performance Metrics</h2>
+                        <div class="stats-overview-grid">
+                            <div class="stat-box"><span class="stat-val" id="stat-avg-wt">0.00</span><span class="stat-lbl">Avg Waiting</span></div>
+                            <div class="stat-box"><span class="stat-val" id="stat-avg-tat">0.00</span><span class="stat-lbl">Avg Turnaround</span></div>
+                            <div class="stat-box"><span class="stat-val" id="stat-avg-rt">0.00</span><span class="stat-lbl">Avg Response</span></div>
+                            <div class="stat-box"><span class="stat-val" id="stat-cpu-util">0%</span><span class="stat-lbl">CPU Utilization</span></div>
+                            <div class="stat-box"><span class="stat-val" id="stat-jain-fairness">1.00</span><span class="stat-lbl">Fairness</span></div>
+                            <div class="stat-box"><span class="stat-val" id="stat-throughput">0.0</span><span class="stat-lbl">Throughput</span></div>
+                            <div class="stat-box"><span class="stat-val" id="stat-ctx-sw">0</span><span class="stat-lbl">Context Switches</span></div>
+                        </div>
+
+                        <div class="results-table-wrapper">
+                            <table id="final-results-table">
+                                <thead>
+                                    <tr>
+                                        <th>PID</th>
+                                        <th>Arrival</th>
+                                        <th>Burst</th>
+                                        <th>Priority</th>
+                                        <th>Start</th>
+                                        <th>Completion</th>
+                                        <th>Waiting</th>
+                                        <th>Turnaround</th>
+                                        <th>Response</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="results-table-body"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <div class="dialog-overlay" id="add-process-dialog">
+        <div class="dialog-card">
+            <h3>Add New Process</h3>
+            <form id="add-process-form">
+                <div class="form-group"><label for="new-pid">Process ID</label><input type="text" id="new-pid" value="P" required></div>
+                <div class="form-group"><label for="new-arrival">Arrival Time</label><input type="number" id="new-arrival" min="0" value="0" required></div>
+                <div class="form-group"><label for="new-burst">Burst Time</label><input type="number" id="new-burst" min="1" value="5" required></div>
+                <div class="form-group"><label for="new-priority">Priority</label><input type="number" id="new-priority" min="1" value="3" required></div>
+                <div class="dialog-buttons">
+                    <button type="button" class="btn btn-secondary" id="btn-dialog-cancel">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Add Process</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

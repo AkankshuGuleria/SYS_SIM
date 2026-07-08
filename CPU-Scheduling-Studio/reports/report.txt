@@ -1,0 +1,17 @@
+CPU SCHEDULING STUDIO – PERFORMANCE REPORT
+Generated: 2026-07-06 13:21:54
+======================================================================
+
+INPUT PROCESSES
+------------------------------------------------------------
+PID  Arrival   Burst   Priority  
+
+
+ALGORITHM COMPARISON
+------------------------------------------------------------
+FCFS (First Come First Serve)            WT=0.00 TAT=0.00 CPU=0.00%
+SJF (Shortest Job First – Non-Preempti WT=0.00 TAT=0.00 CPU=0.00%
+SRTF (Shortest Remaining Time First –  WT=0.00 TAT=0.00 CPU=0.00%
+Priority (Non-Preemptive)                WT=0.00 TAT=0.00 CPU=0.00%
+Priority Preemptive (Highest Priority Fi WT=0.00 TAT=0.00 CPU=0.00%
+Round Robin (Q=2)                        WT=0.00 TAT=0.00 CPU=0.00%

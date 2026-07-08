@@ -1,0 +1,22 @@
+# Compiled binaries
+*.exe
+*.o
+*.obj
+*.dll
+*.lib
+*.pdb
+*.out
+*.bin
+
+# Build directories
+build/
+out/
+cmake-build-*/
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# VS Code directory (keep settings/launch, ignore temporary states)
+.vscode/.react/
+.vscode/chrome-debug-profile/

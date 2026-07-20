@@ -1,75 +1,65 @@
-// ============================================================
-//  Process.h
-//  Defines the Process data structure and related enumerations.
-//  Every scheduling algorithm operates on a vector of Process
-//  objects, keeping the data model independent of the UI.
-// ============================================================
 #pragma once
-
 #include <string>
 #include <vector>
 
-// ============================================================
-//  Process lifecycle states (maps to the "State" column in
-//  the dashboard).
-// ============================================================
+// ================================================================
+//  DSA CONCEPT: enum class (named constants for process states)
+//  Represents where a process is in its lifecycle.
+// ================================================================
 enum class ProcessState {
-    NEW,        ///< Just created – not yet in any queue
-    READY,      ///< In the ready queue, waiting for CPU
-    RUNNING,    ///< Currently executing on the CPU
-    WAITING,    ///< Blocked / waiting for I/O (reserved for future use)
-    TERMINATED  ///< Finished execution
+    NEW,        // just created, hasn't entered any queue yet
+    READY,      // in the ready queue, waiting for CPU
+    RUNNING,    // currently executing on the CPU
+    WAITING,    // blocked (e.g. waiting for I/O) — reserved for future use
+    TERMINATED  // finished execution
 };
 
-// ============================================================
-//  GanttEntry – one coloured block in the Gantt chart.
-// ============================================================
+// ================================================================
+//  DSA CONCEPT: struct (simple data bundle)
+//  Represents one coloured block on the Gantt chart.
+// ================================================================
 struct GanttEntry {
-    std::string pid;    ///< "P1" … "Idle"
-    int         start;  ///< Inclusive start time
-    int         end;    ///< Exclusive end time
+    std::string pid;   // process ID, e.g. "P1" or "Idle"
+    int start;         // time when this block started
+    int end;           // time when this block ended
 };
 
-// ============================================================
-//  SchedulingLog – one line in the decision log.
-// ============================================================
+// ================================================================
+//  DSA CONCEPT: struct
+//  Represents one line in the scheduling decision log.
+// ================================================================
 struct SchedulingLog {
-    int         time;     ///< Clock tick when decision was made
-    std::string pid;      ///< Process selected (or "Idle")
-    std::string reason;   ///< Human-readable explanation
+    int time;           // clock tick when the decision was made
+    std::string pid;    // process selected (or "Idle")
+    std::string reason; // why this process was chosen
 };
 
-// ============================================================
-//  Process – central data object
+// ================================================================
+//  DSA CONCEPT: struct (the main data object)
 //
-//  Immutable fields (set at creation):
-//    pid, arrivalTime, burstTime, priority
-//
-//  Mutable fields (updated by the scheduler):
-//    remainingTime, state, completionTime, waitingTime,
-//    turnaroundTime, responseTime, startTime
-// ============================================================
+//  Process holds everything about one process.
+//  Input fields (set by user):   arrivalTime, burstTime, priority
+//  Output fields (set by sim):   waitingTime, turnaroundTime, etc.
+// ================================================================
 struct Process {
-    // ---- Identity ----------------------------------------
-    std::string pid;          ///< Unique process identifier e.g. "P1"
+    std::string pid;           // unique identifier, e.g. "P1"
 
-    // ---- Inputs (provided by user / random generator) ----
-    int arrivalTime   = 0;    ///< Time unit at which process arrives
-    int burstTime     = 0;    ///< Total CPU time required
-    int priority      = 0;    ///< Lower number = Higher priority (Priority scheduling)
+    // --- Input fields (given by the user) ---
+    int arrivalTime   = 0;     // time unit when this process arrives
+    int burstTime     = 0;     // total CPU time it needs
+    int priority      = 0;     // lower number = higher urgency
 
-    // ---- Runtime fields (modified during simulation) -----
-    int remainingTime = 0;    ///< Burst time left
-    int startTime     = -1;   ///< First time process got CPU (-1 = not started)
-    int completionTime= 0;    ///< Time unit when process finished
-    int waitingTime   = 0;    ///< Total time spent waiting in ready queue
-    int turnaroundTime= 0;    ///< completionTime - arrivalTime
-    int responseTime  = 0;    ///< startTime - arrivalTime
+    // --- Runtime fields (updated tick-by-tick during simulation) ---
+    int remainingTime = 0;     // burst time still left
+    int startTime     = -1;    // first time it got the CPU (-1 = not yet)
+    int completionTime= 0;     // time it finished
+    int waitingTime   = 0;     // time spent in ready queue
+    int turnaroundTime= 0;     // completionTime - arrivalTime
+    int responseTime  = 0;     // startTime - arrivalTime
 
-    // ---- State -------------------------------------------
     ProcessState state = ProcessState::NEW;
 
-    // ---- Convenience: reset runtime fields for re-use ----
+    // --- Member function: reset before each simulation run ---
     void resetForSimulation() {
         remainingTime  = burstTime;
         startTime      = -1;
@@ -80,7 +70,7 @@ struct Process {
         state          = ProcessState::NEW;
     }
 
-    // ---- State helper ------------------------------------
+    // --- Member function: return state as a printable string ---
     std::string stateStr() const {
         switch (state) {
             case ProcessState::NEW:        return "NEW";
@@ -93,28 +83,35 @@ struct Process {
     }
 };
 
-// ============================================================
-//  SimulationResult
-//  Returned by every scheduling algorithm after completion.
-// ============================================================
+// ================================================================
+//  DSA CONCEPT: struct (aggregate result object)
+//  Returned by every scheduling algorithm after it finishes.
+//  DSA used inside: vector (dynamic array) to hold processes,
+//  Gantt entries, and log entries.
+// ================================================================
 struct SimulationResult {
-    std::string            algorithmName;
-    std::vector<Process>   processes;       ///< Final state of each process
-    std::vector<GanttEntry> gantt;          ///< Gantt chart blocks
-    std::vector<SchedulingLog> log;         ///< Decision log entries
+    std::string              algorithmName;
 
-    // Aggregated statistics
+    // DSA: vector<Process> — dynamic array of all processes
+    std::vector<Process>     processes;
+
+    // DSA: vector<GanttEntry> — dynamic array of Gantt chart blocks
+    std::vector<GanttEntry>  gantt;
+
+    // DSA: vector<SchedulingLog> — dynamic array of log entries
+    std::vector<SchedulingLog> log;
+
+    // --- Computed statistics ---
     double avgWaitingTime    = 0.0;
     double avgTurnaroundTime = 0.0;
     double avgResponseTime   = 0.0;
-    double cpuUtilization    = 0.0;   ///< Percentage
-    double throughput        = 0.0;   ///< Processes / time unit
-    double jainFairnessIndex = 0.0;  ///< Jain's Fairness Index on TAT [1/n … 1.0]
+    double cpuUtilization    = 0.0;
+    double throughput        = 0.0;
+    double jainFairnessIndex = 0.0;
     int    contextSwitches   = 0;
-    int    totalTime         = 0;     ///< Last completion time
+    int    totalTime         = 0;
     int    idleTime          = 0;
 
-    // Helpers for finding extremes
     std::string longestWaitingPID;
     std::string shortestWaitingPID;
 };

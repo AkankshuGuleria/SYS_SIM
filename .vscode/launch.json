@@ -8,8 +8,8 @@
       "args": [],
       "stopAtEntry": false,
       "externalConsole": true,
-      "cwd": "c:/Users/hp/Desktop/SYSSIM",
-      "program": "c:/Users/hp/Desktop/SYSSIM/build/Debug/outDebug",
+      "cwd": "c:/Users/hp/Desktop/SYSSIM/CPU-Scheduling-Studio",
+      "program": "c:/Users/hp/Desktop/SYSSIM/CPU-Scheduling-Studio/build/Debug/outDebug",
       "MIMode": "gdb",
       "miDebuggerPath": "gdb",
       "setupCommands": [

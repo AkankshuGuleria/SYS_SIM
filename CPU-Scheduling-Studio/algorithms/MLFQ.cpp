@@ -1,33 +1,32 @@
-// MLFQ.cpp - Multi-Level Feedback Queue Scheduling
+// ================================================================
+//  MLFQ.cpp — Multi-Level Feedback Queue (3 Levels)
 //
-// Design rationale (why this exists alongside the other six):
+//  ALGORITHM:
+//    Three queues, each with different priority and time quantum:
+//      Q0 (highest priority): quantum = timeQuantum          (e.g. 2)
+//      Q1 (medium priority):  quantum = timeQuantum * 2      (e.g. 4)
+//      Q2 (lowest priority):  runs to completion (FCFS)
 //
-//   FCFS and SJF assume burst time is known upfront; MLFQ does not.
-//   Priority NP suffers starvation; RR is fair but ignores burst length.
-//   MLFQ approximates SJF adaptively: short jobs self-select into the
-//   high-priority queue by finishing within the quantum; long jobs
-//   progressively demote themselves.  A promotion (aging) rule then
-//   prevents the starvation that haunts static-priority schemes.
+//    Every new process enters Q0.
+//    DEMOTION: if a process exhausts its quantum without finishing,
+//              it drops one level (Q0->Q1->Q2).
+//    PROMOTION (Aging): processes waiting in Q1/Q2 gain age ticks.
+//              After agingThresh ticks, they are promoted one level.
+//              This prevents starvation.
 //
-// Queue structure (configurable via settings.timeQuantum as Q1 base):
-//   Q0  highest priority, quantum = timeQuantum          (default 4)
-//   Q1  medium  priority, quantum = timeQuantum * 2      (default 8)
-//   Q2  lowest  priority, FCFS (runs until completion)
-//
-// Demotion: if a process exhausts its quantum at level k < 2, it drops
-//           to level k+1 and goes to the back of that queue.
-//
-// Promotion / aging: every tick, any process waiting in Q1 or Q2 has
-//           its `ageTicks` incremented.  Once ageTicks exceeds the
-//           aging threshold (4 * timeQuantum), it is promoted one
-//           level and ageTicks resets.  This guarantees no process
-//           waits indefinitely regardless of the workload.
-
+//  DSA USED:
+//    - Class with Inheritance  (MLFQScheduler extends Scheduler)
+//    - vector<Process>         (all processes)
+//    - deque<int>[3]           (three FIFO queues holding process indices)
+//    - vector<int>             (queueLevel: which queue each process is in)
+//    - vector<int>             (ageTicks: ticks spent waiting in Q1/Q2)
+//    - vector<GanttEntry>      (Gantt chart)
+//    - vector<SchedulingLog>   (decision log)
+// ================================================================
 #include "../include/Scheduler.h"
 #include "../include/Utilities.h"
 #include <algorithm>
-#include <deque>
-#include <string>
+#include <deque>    // DSA: deque — double-ended queue (used as FIFO here)
 
 class MLFQScheduler : public Scheduler {
 public:
@@ -36,87 +35,88 @@ public:
     SimulationResult run(
         std::vector<Process> procs,
         const AppSettings&   settings,
-        std::function<void(int, const std::vector<Process>&,
-                           const std::vector<GanttEntry>&,
-                           const std::vector<SchedulingLog>&)> onTick) override
+        TickCallback         onTick) override
     {
         SimulationResult result;
         result.algorithmName = algorithmName_
             + " [Q=" + std::to_string(settings.timeQuantum) + "]";
-        for (auto& p : procs) p.resetForSimulation();
+        for (int i = 0; i < (int)procs.size(); i++) procs[i].resetForSimulation();
 
         std::vector<GanttEntry>    gantt;
         std::vector<SchedulingLog> log;
 
-        const int n            = (int)procs.size();
-        const int Q0           = settings.timeQuantum;      // e.g. 4
-        const int Q1           = settings.timeQuantum * 2;  // e.g. 8
-        const int agingThresh  = settings.timeQuantum * 4;  // e.g. 16
+        int n             = (int)procs.size();
+        int time          = 0;
+        int completed     = 0;
+        int Q0            = settings.timeQuantum;       // quantum for level 0
+        int Q1            = settings.timeQuantum * 2;   // quantum for level 1
+        int agingThresh   = settings.timeQuantum * 4;   // ticks before promotion
 
-        // Per-process mutable metadata (not part of Process struct
-        // so we don't pollute the shared data model)
-        std::vector<int> queueLevel(n, 0);   // which queue (0,1,2)
-        std::vector<int> ageTicks(n, 0);     // ticks spent waiting in Q1/Q2
+        // DSA: vector<int> — which queue (level) each process is currently in
+        std::vector<int> queueLevel(n, 0);
 
-        // Three FIFO ready queues holding indices into procs[]
+        // DSA: vector<int> — how many ticks each process has waited in Q1/Q2
+        std::vector<int> ageTicks(n, 0);
+
+        // DSA: deque<int>[3] — three separate FIFO ready queues
+        // Each stores indices into procs[]
         std::deque<int> q[3];
 
-        int time      = 0;
-        int completed = 0;
-
-        // Sort arrival order for efficient new-arrival scanning
+        // Sort process indices by arrival time
         std::vector<int> byArrival(n);
         for (int i = 0; i < n; i++) byArrival[i] = i;
         std::stable_sort(byArrival.begin(), byArrival.end(),
-            [&](int a, int b){ return procs[a].arrivalTime < procs[b].arrivalTime; });
-
+            [&](int a, int b) { return procs[a].arrivalTime < procs[b].arrivalTime; });
         int nextCheck = 0;
 
+        // Helper: add all newly arrived processes to Q0
         auto enqueueArrivals = [&]() {
-            while (nextCheck < n &&
-                   procs[byArrival[nextCheck]].arrivalTime <= time) {
+            while (nextCheck < n && procs[byArrival[nextCheck]].arrivalTime <= time) {
                 int idx = byArrival[nextCheck++];
                 procs[idx].state = ProcessState::READY;
-                q[0].push_back(idx);   // all new processes enter Q0
+                q[0].push_back(idx);  // all new processes start at Q0 (highest priority)
             }
         };
 
-        // Promotion pass: scan Q1 and Q2 for processes that have
-        // aged past the threshold and move them up one level.
+        // Helper: promote processes that have been waiting too long in Q1/Q2
         auto applyAging = [&]() {
             for (int level = 1; level <= 2; level++) {
-                std::deque<int> kept;
+                std::deque<int> kept;  // processes that stay at this level
+
                 for (int idx : q[level]) {
                     ageTicks[idx]++;
+
                     if (ageTicks[idx] >= agingThresh) {
-                        ageTicks[idx]  = 0;
+                        // Promote one level
+                        ageTicks[idx]   = 0;
                         queueLevel[idx] = level - 1;
-                        q[level - 1].push_back(idx);  // promote
+                        q[level - 1].push_back(idx);
                         log.push_back({ time, procs[idx].pid,
-                            "Aged out of Q" + std::to_string(level)
-                            + " -> promoted to Q" + std::to_string(level-1) });
+                            "Aged: promoted Q" + std::to_string(level) +
+                            " -> Q" + std::to_string(level - 1) });
                     } else {
-                        kept.push_back(idx);
+                        kept.push_back(idx);  // stays here
                     }
                 }
                 q[level] = kept;
             }
         };
 
-        enqueueArrivals();
+        enqueueArrivals();  // seed with processes arriving at time 0
 
         while (completed < n) {
-            // Find the highest-priority non-empty queue
+            // Find the highest-priority non-empty queue (Q0 first, then Q1, Q2)
             int chosen_q = -1;
             for (int lv = 0; lv <= 2; lv++) {
                 if (!q[lv].empty()) { chosen_q = lv; break; }
             }
 
-            // CPU idle
+            // All queues empty — CPU idle, jump to next arrival
             if (chosen_q == -1) {
                 if (nextCheck >= n) break;
                 int nextArr = procs[byArrival[nextCheck]].arrivalTime;
                 gantt.push_back({ "Idle", time, nextArr });
+
                 for (int t = time; t < nextArr; t++) {
                     if (onTick) onTick(t, procs, gantt, log);
                     if (settings.stepMode) pressEnter();
@@ -127,27 +127,29 @@ public:
                 continue;
             }
 
-            // Dequeue from chosen level
-            int idx      = q[chosen_q].front();
+            // Dequeue from the chosen level (FIFO within each level)
+            int idx = q[chosen_q].front();
             q[chosen_q].pop_front();
-            Process& cur = procs[idx];
-            cur.state    = ProcessState::RUNNING;
-            if (cur.startTime == -1) cur.startTime = time;
-            ageTicks[idx] = 0;   // reset age counter when on CPU
 
-            // Determine quantum for this level (Q2 = unlimited, so use remaining)
+            Process& cur = procs[idx];
+            cur.state = ProcessState::RUNNING;
+            if (cur.startTime == -1) cur.startTime = time;
+            ageTicks[idx] = 0;  // reset age counter when process gets CPU
+
+            // Determine quantum for this level (Q2 = no limit, run to completion)
             int quantum = (chosen_q == 0) ? Q0
                         : (chosen_q == 1) ? Q1
-                        :                   cur.remainingTime;
+                        :                   cur.remainingTime;  // Q2: FCFS
 
             log.push_back({ time, cur.pid,
-                "Q" + std::to_string(chosen_q) + " (quantum=" +
-                std::to_string(quantum) + ", rem=" +
-                std::to_string(cur.remainingTime) + ")" });
+                "Q" + std::to_string(chosen_q) +
+                " (quantum=" + std::to_string(quantum) +
+                ", remaining=" + std::to_string(cur.remainingTime) + ")" });
 
             int startT    = time;
             int ticksDone = 0;
 
+            // Run for up to quantum ticks
             while (ticksDone < quantum && cur.remainingTime > 0) {
                 if (onTick) onTick(time, procs, gantt, log);
                 if (settings.stepMode) pressEnter();
@@ -157,29 +159,27 @@ public:
                 time++;
                 ticksDone++;
 
-                enqueueArrivals();
-                applyAging();
+                enqueueArrivals();  // check for new arrivals each tick
+                applyAging();       // update age counters for waiting processes
             }
 
             gantt.push_back({ cur.pid, startT, time });
 
             if (cur.remainingTime == 0) {
+                // Finished
                 cur.state          = ProcessState::TERMINATED;
                 cur.completionTime = time;
                 completed++;
             } else {
-                // Demote if quantum exhausted and not already at Q2
+                // Demote: quantum exhausted, process goes one level lower
                 if (chosen_q < 2) {
                     queueLevel[idx] = chosen_q + 1;
                     log.push_back({ time, cur.pid,
-                        "Quantum exhausted -> demoted Q"
-                        + std::to_string(chosen_q)
-                        + " -> Q" + std::to_string(chosen_q + 1) });
-                } else {
-                    queueLevel[idx] = 2;   // stays in Q2
+                        "Quantum exhausted: demoted Q" + std::to_string(chosen_q) +
+                        " -> Q" + std::to_string(chosen_q + 1) });
                 }
                 cur.state = ProcessState::READY;
-                q[queueLevel[idx]].push_back(idx);
+                q[queueLevel[idx]].push_back(idx);  // add to back of its queue
             }
         }
 

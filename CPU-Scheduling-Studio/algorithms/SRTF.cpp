@@ -1,7 +1,20 @@
-// ============================================================
-//  SRTF.cpp
-//  Shortest Remaining Time First - Preemptive SJF
-// ============================================================
+// ================================================================
+//  SRTF.cpp — Shortest Remaining Time First (Preemptive SJF)
+//
+//  ALGORITHM:
+//    Every clock tick, look at all arrived processes.
+//    Pick the one with the LEAST remaining burst time.
+//    If a shorter job arrives while another is running, preempt it.
+//    This is essentially SJF but re-evaluated every tick.
+//
+//  DSA USED:
+//    - Class with Inheritance  (SRTFScheduler extends Scheduler)
+//    - vector<Process>         (all processes)
+//    - vector<GanttEntry>      (Gantt chart, merged into blocks)
+//    - vector<SchedulingLog>   (decision log)
+//    - Linear Search           (to find min remaining time each tick)
+//    - Two-pointer tracking    (prevIdx + blockStart to merge Gantt blocks)
+// ================================================================
 #include "../include/Scheduler.h"
 #include "../include/Utilities.h"
 #include <algorithm>
@@ -13,60 +26,59 @@ public:
     SimulationResult run(
         std::vector<Process> procs,
         const AppSettings&   settings,
-        std::function<void(int, const std::vector<Process>&,
-                           const std::vector<GanttEntry>&,
-                           const std::vector<SchedulingLog>&)> onTick) override
+        TickCallback         onTick) override
     {
         SimulationResult result;
         result.algorithmName = algorithmName_;
-        for (auto& p : procs) p.resetForSimulation();
+        for (int i = 0; i < (int)procs.size(); i++) procs[i].resetForSimulation();
 
         std::vector<GanttEntry>    gantt;
         std::vector<SchedulingLog> log;
 
         int n         = (int)procs.size();
-        int time      = 0;
         int completed = 0;
 
-        // Jump to first arrival
+        // Start simulation at the earliest arrival time
         int minArrival = INT_MAX;
-        for (auto& p : procs) minArrival = std::min(minArrival, p.arrivalTime);
-        time = minArrival;
+        for (int i = 0; i < n; i++) minArrival = std::min(minArrival, procs[i].arrivalTime);
+        int time = minArrival;
 
-        int prevIdx    = -1;
+        // Track current Gantt block: who ran last and when the block started
+        int prevIdx    = -1;  // index of process in previous tick (-1 = none)
         int blockStart = time;
 
         while (completed < n) {
-            // Pick ready process with minimum remaining time
+            // DSA: Linear Search — find arrived process with smallest remaining time
             int bestIdx = -1;
             int bestRem = INT_MAX;
+
             for (int i = 0; i < n; i++) {
-                auto& p = procs[i];
-                if (p.arrivalTime <= time &&
-                    p.state != ProcessState::TERMINATED &&
-                    p.remainingTime > 0) {
-                    if (p.remainingTime < bestRem ||
-                        (p.remainingTime == bestRem && bestIdx != -1 &&
-                         p.arrivalTime < procs[bestIdx].arrivalTime)) {
+                Process& p = procs[i];
+                bool hasArrived = p.arrivalTime <= time;
+                bool notDone    = p.state != ProcessState::TERMINATED;
+                bool hasWork    = p.remainingTime > 0;
+
+                if (hasArrived && notDone && hasWork) {
+                    bool isShorter   = p.remainingTime < bestRem;
+                    bool isTieSooner = (p.remainingTime == bestRem) && bestIdx != -1
+                                       && p.arrivalTime < procs[bestIdx].arrivalTime;
+
+                    if (isShorter || isTieSooner) {
                         bestRem = p.remainingTime;
                         bestIdx = i;
                     }
                 }
             }
 
-            // CPU idle
+            // CPU idle — advance one tick, extend or create an Idle Gantt block
             if (bestIdx == -1) {
+                // Close any open process block first
                 if (prevIdx != -1) {
                     gantt.push_back({ procs[prevIdx].pid, blockStart, time });
                     prevIdx    = -1;
                     blockStart = time;
                 }
-                int nextArrival = INT_MAX;
-                for (auto& p : procs)
-                    if (p.state != ProcessState::TERMINATED && p.arrivalTime > time)
-                        nextArrival = std::min(nextArrival, p.arrivalTime);
-                if (nextArrival == INT_MAX) break;
-
+                // Extend or create Idle block
                 if (gantt.empty() || gantt.back().pid != "Idle")
                     gantt.push_back({ "Idle", time, time + 1 });
                 else
@@ -75,34 +87,37 @@ public:
                 if (onTick) onTick(time, procs, gantt, log);
                 if (settings.stepMode) pressEnter();
                 else sleepMs(settings.animationSpeedMs);
+
                 time++;
                 blockStart = time;
                 continue;
             }
 
             Process& current = procs[bestIdx];
-            if (current.startTime == -1) current.startTime = time;
+            if (current.startTime == -1) current.startTime = time;  // first time on CPU
 
-            // Detect context switch / new block
-            if (bestIdx != prevIdx) {
+            // Detect context switch: process changed since last tick
+            bool contextSwitch = (bestIdx != prevIdx);
+            if (contextSwitch) {
+                // Close previous block
                 if (prevIdx != -1)
                     gantt.push_back({ procs[prevIdx].pid, blockStart, time });
                 else if (blockStart < time)
                     gantt.push_back({ "Idle", blockStart, time });
+
+                // Start new block
                 blockStart = time;
                 prevIdx    = bestIdx;
-
-                std::string reason = "Shortest Remaining Time = "
-                    + std::to_string(current.remainingTime);
-                log.push_back({ time, current.pid, reason });
+                log.push_back({ time, current.pid,
+                    "Shortest Remaining = " + std::to_string(current.remainingTime) });
             }
 
-            // Update states
+            // Update all arrived processes to READY state
             for (int i = 0; i < n; i++) {
-                auto& p = procs[i];
-                if (p.arrivalTime <= time && p.state == ProcessState::NEW &&
-                    p.remainingTime > 0)
-                    p.state = ProcessState::READY;
+                if (procs[i].arrivalTime <= time
+                    && procs[i].state == ProcessState::NEW
+                    && procs[i].remainingTime > 0)
+                    procs[i].state = ProcessState::READY;
             }
             current.state = ProcessState::RUNNING;
 
@@ -110,10 +125,12 @@ public:
             if (settings.stepMode) pressEnter();
             else sleepMs(settings.animationSpeedMs);
 
+            // Advance one tick
             current.remainingTime--;
             time++;
 
             if (current.remainingTime == 0) {
+                // Process finished — close its Gantt block
                 current.state          = ProcessState::TERMINATED;
                 current.completionTime = time;
                 gantt.push_back({ current.pid, blockStart, time });
@@ -121,6 +138,7 @@ public:
                 prevIdx    = -1;
                 completed++;
             } else if (current.state == ProcessState::RUNNING) {
+                // Still has work, mark back as READY for re-evaluation next tick
                 current.state = ProcessState::READY;
             }
         }

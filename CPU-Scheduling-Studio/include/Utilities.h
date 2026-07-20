@@ -1,12 +1,4 @@
-// ============================================================
-//  Utilities.h
-//  General-purpose helper functions used across all modules.
-//  Topics: string formatting, process table printing,
-//          Gantt chart rendering, statistics calculation,
-//          input validation, random process generation.
-// ============================================================
 #pragma once
-
 #include <string>
 #include <vector>
 #include <sstream>
@@ -20,44 +12,26 @@
 #include "Process.h"
 #include "Colors.h"
 
-// ============================================================
-//  String helpers
-// ============================================================
-
-/// Pad string to exact width with spaces (left-aligned).
-inline std::string padRight(const std::string& s, int width) {
-    if ((int)s.size() >= width) return s.substr(0, width);
-    return s + std::string(width - s.size(), ' ');
+// --- String padding helpers ---
+inline std::string padRight(const std::string& s, int w) {
+    if ((int)s.size() >= w) return s.substr(0, w);
+    return s + std::string(w - s.size(), ' ');
 }
-
-/// Pad string to exact width with spaces (right-aligned).
-inline std::string padLeft(const std::string& s, int width) {
-    if ((int)s.size() >= width) return s.substr(0, width);
-    return std::string(width - s.size(), ' ') + s;
+inline std::string padLeft(const std::string& s, int w) {
+    if ((int)s.size() >= w) return s.substr(0, w);
+    return std::string(w - s.size(), ' ') + s;
 }
-
-/// Center a string within a field of `width`.
-inline std::string center(const std::string& s, int width) {
-    if ((int)s.size() >= width) return s.substr(0, width);
-    int pad  = width - (int)s.size();
-    int left = pad / 2;
-    int right= pad - left;
-    return std::string(left, ' ') + s + std::string(right, ' ');
+inline std::string center(const std::string& s, int w) {
+    if ((int)s.size() >= w) return s.substr(0, w);
+    int pad = w - (int)s.size(), left = pad / 2;
+    return std::string(left, ' ') + s + std::string(pad - left, ' ');
 }
-
-/// Repeat a character n times.
-inline std::string repeat(char c, int n) {
-    return (n > 0) ? std::string(n, c) : "";
-}
-
-/// Format a double to 2 decimal places.
+inline std::string repeat(char c, int n) { return (n > 0) ? std::string(n, c) : ""; }
 inline std::string fmt2(double v) {
     std::ostringstream ss;
     ss << std::fixed << std::setprecision(2) << v;
     return ss.str();
 }
-
-/// Get a current date-time string for report headers.
 inline std::string currentDateTime() {
     auto now = std::chrono::system_clock::now();
     std::time_t t = std::chrono::system_clock::to_time_t(now);
@@ -66,30 +40,20 @@ inline std::string currentDateTime() {
     return std::string(buf);
 }
 
-// ============================================================
-//  Progress bar (for CPU burst visualisation)
-//  filled: cells already consumed  total: full width in chars
-// ============================================================
+// --- Progress bar: shows how much burst time has been consumed ---
 inline std::string progressBar(int remaining, int total, int barWidth = 20) {
     if (total <= 0) total = 1;
     int filled = barWidth - (int)((double)remaining / total * barWidth);
     filled = std::max(0, std::min(filled, barWidth));
-    // Use unicode block characters: █ (filled) vs ░ (empty)
-    std::string result = "[";
-    for (int i = 0; i < barWidth; i++) {
-        result += (i < filled) ? "\xE2\x96\x88" : "\xE2\x96\x91";
-    }
-    result += "]";
-    return result;
+    std::string r = "[";
+    for (int i = 0; i < barWidth; i++)
+        r += (i < filled) ? "\xE2\x96\x88" : "\xE2\x96\x91";
+    return r + "]";
 }
 
-// ============================================================
-//  Statistics calculation
-//  Fills aggregated fields of SimulationResult.
-// ============================================================
+// --- Compute aggregate statistics after simulation ends ---
 inline void computeStatistics(SimulationResult& res) {
     if (res.processes.empty()) return;
-
     double sumWT = 0, sumTAT = 0, sumRT = 0;
     int maxWT = -1, minWT = INT32_MAX;
     std::string maxPID, minPID;
@@ -106,53 +70,29 @@ inline void computeStatistics(SimulationResult& res) {
     res.avgWaitingTime    = sumWT  / n;
     res.avgTurnaroundTime = sumTAT / n;
     res.avgResponseTime   = sumRT  / n;
+    res.cpuUtilization    = (res.totalTime > 0) ? 100.0 * (res.totalTime - res.idleTime) / res.totalTime : 0.0;
+    res.throughput        = (res.totalTime > 0) ? (double)n / res.totalTime : 0.0;
 
-    // CPU utilization
-    int busyTime = res.totalTime - res.idleTime;
-    res.cpuUtilization = (res.totalTime > 0)
-        ? 100.0 * busyTime / res.totalTime : 0.0;
-
-    // Throughput = processes completed / total time
-    res.throughput = (res.totalTime > 0)
-        ? (double)n / res.totalTime : 0.0;
-
-    // Jain's Fairness Index on turnaround times:
-    //   J = (\u03a3 TAT_i)\u00b2 / (n \u00d7 \u03a3 TAT_i\u00b2)
-    //   Range: [1/n, 1.0].  1.0 = perfectly fair (identical TAT for all).
+    // Jain's Fairness Index: J = (sum TAT)^2 / (n * sum TAT^2), range [1/n, 1.0]
     double sumTATsq = 0.0;
-    for (const auto& p : res.processes) {
-        double tat = static_cast<double>(p.turnaroundTime);
-        sumTATsq += tat * tat;
-    }
-    res.jainFairnessIndex = (sumTATsq > 0.0)
-        ? (sumTAT * sumTAT) / (n * sumTATsq)
-        : 1.0;
+    for (const auto& p : res.processes) { double tat = p.turnaroundTime; sumTATsq += tat * tat; }
+    res.jainFairnessIndex = (sumTATsq > 0.0) ? (sumTAT * sumTAT) / (n * sumTATsq) : 1.0;
 
     res.longestWaitingPID  = maxPID;
     res.shortestWaitingPID = minPID;
 }
 
-// ============================================================
-//  Process table printer
-// ============================================================
+// --- Print a colour-coded process table ---
 inline void printProcessTable(const std::vector<Process>& procs) {
     const int W = 80;
-    std::string line = repeat('-', W);
-
-    std::cout << clrHeader(line) << "\n";
+    std::cout << clrHeader(repeat('-', W)) << "\n";
     std::cout << clrHeader(
-        " " + padRight("PID",4) + " | " +
-        padRight("Arrival",8) + " | " +
-        padRight("Burst",6)   + " | " +
-        padRight("Priority",9) + " | " +
-        padRight("Start",6)   + " | " +
-        padRight("Finish",7)  + " | " +
-        padRight("WT",5)      + " | " +
-        padRight("TAT",5)     + " | " +
-        padRight("RT",5)      + " | " +
-        "State"
-    ) << "\n";
-    std::cout << clrHeader(line) << "\n";
+        " " + padRight("PID",4) + " | " + padRight("Arrival",8) + " | " +
+        padRight("Burst",6) + " | " + padRight("Priority",9) + " | " +
+        padRight("Start",6) + " | " + padRight("Finish",7) + " | " +
+        padRight("WT",5) + " | " + padRight("TAT",5) + " | " +
+        padRight("RT",5) + " | " + "State") << "\n";
+    std::cout << clrHeader(repeat('-', W)) << "\n";
 
     for (const auto& p : procs) {
         std::string row =
@@ -167,7 +107,6 @@ inline void printProcessTable(const std::vector<Process>& procs) {
             padRight(std::to_string(p.responseTime), 5)    + " | " +
             p.stateStr();
 
-        // Colour by state
         if      (p.state == ProcessState::RUNNING)    std::cout << clrRunning(row);
         else if (p.state == ProcessState::READY)      std::cout << clrReady(row);
         else if (p.state == ProcessState::WAITING)    std::cout << clrWaiting(row);
@@ -175,115 +114,85 @@ inline void printProcessTable(const std::vector<Process>& procs) {
         else                                           std::cout << row;
         std::cout << "\n";
     }
-    std::cout << clrHeader(line) << "\n";
+    std::cout << clrHeader(repeat('-', W)) << "\n";
 }
 
-// ============================================================
-//  Gantt chart renderer
-// ============================================================
+// --- Print the Gantt chart with time markers ---
 inline void printGanttChart(const std::vector<GanttEntry>& gantt) {
     if (gantt.empty()) { std::cout << "(empty)\n"; return; }
-
-    std::cout << "\n";
-
-    // Top border
     std::string top = "+";
     for (const auto& g : gantt) {
         int w = std::max(4, (int)g.pid.size() + 2);
         top += repeat('-', w) + "+";
     }
-    std::cout << clrMenu(top) << "\n";
+    std::cout << "\n" << clrMenu(top) << "\n";
 
-    // Process labels
     std::string labels = "|";
     for (const auto& g : gantt) {
         int w = std::max(4, (int)g.pid.size() + 2);
         std::string cell = center(g.pid, w);
-        if      (g.pid == "Idle") labels += clrDim(cell) + "|";
-        else                      labels += clrRunning(cell) + "|";
+        labels += (g.pid == "Idle" ? clrDim(cell) : clrRunning(cell)) + "|";
     }
-    std::cout << labels << "\n";
+    std::cout << labels << "\n" << clrMenu(top) << "\n";
 
-    // Bottom border
-    std::cout << clrMenu(top) << "\n";
-
-    // Time markers
-    std::string times;
-    // First marker at the start time of the first block
-    times += std::to_string(gantt.front().start);
-    int prevLen = (int)std::to_string(gantt.front().start).size();
+    // Time markers below each block
+    std::string times = std::to_string(gantt.front().start);
+    int prevLen = (int)times.size();
     for (const auto& g : gantt) {
-        int cellW = std::max(4, (int)g.pid.size() + 2) + 1; // +1 for '|'
+        int cellW = std::max(4, (int)g.pid.size() + 2) + 1;
         std::string t = std::to_string(g.end);
-        int spaces = cellW - prevLen - (int)t.size();
-        if (spaces < 0) spaces = 0;
+        int spaces = std::max(0, cellW - prevLen - (int)t.size());
         times += std::string(spaces, ' ') + t;
         prevLen = (int)t.size();
     }
     std::cout << clrDim(times) << "\n\n";
 }
 
-// ============================================================
-//  Statistics summary printer
-// ============================================================
+// --- Print aggregated performance statistics ---
 inline void printStatistics(const SimulationResult& res) {
     const int W = 50;
-    std::string line = repeat('=', W);
-
-    std::cout << clrHeader("\n" + line) << "\n";
+    std::cout << clrHeader("\n" + repeat('=', W)) << "\n";
     std::cout << clrHeader("  PERFORMANCE STATISTICS – " + res.algorithmName) << "\n";
-    std::cout << clrHeader(line) << "\n";
+    std::cout << clrHeader(repeat('=', W)) << "\n";
 
     auto row = [&](const std::string& label, const std::string& val) {
-        std::cout << "  " << clrMenu(padRight(label, 28)) << ": "
-                  << clrBold(val) << "\n";
+        std::cout << "  " << clrMenu(padRight(label, 28)) << ": " << clrBold(val) << "\n";
     };
-
     row("Avg Waiting Time",    fmt2(res.avgWaitingTime)    + " units");
     row("Avg Turnaround Time", fmt2(res.avgTurnaroundTime) + " units");
     row("Avg Response Time",   fmt2(res.avgResponseTime)   + " units");
     row("CPU Utilization",     fmt2(res.cpuUtilization)    + " %");
     row("CPU Idle Time",       std::to_string(res.idleTime)+ " units");
     row("Throughput",          fmt2(res.throughput)        + " proc/unit");
-    row("Jain Fairness Index", fmt2(res.jainFairnessIndex)
-                               + "  (1.0=fair, 1/n=unfair)");
+    row("Jain Fairness Index", fmt2(res.jainFairnessIndex) + "  (1.0=fair)");
     row("Context Switches",    std::to_string(res.contextSwitches));
-    row("Total Execution Time",std::to_string(res.totalTime)+" units");
+    row("Total Execution Time",std::to_string(res.totalTime) + " units");
     row("Longest Waiting PID", res.longestWaitingPID);
     row("Shortest Waiting PID",res.shortestWaitingPID);
-
-    std::cout << clrHeader(line) << "\n\n";
+    std::cout << clrHeader(repeat('=', W)) << "\n\n";
 }
 
-// ============================================================
-//  Scheduling decision log printer
-// ============================================================
+// --- Print the scheduling decision log ---
 inline void printSchedulingLog(const std::vector<SchedulingLog>& log) {
     std::cout << clrHeader("\n===== SCHEDULING DECISION LOG =====\n");
-    for (const auto& entry : log) {
-        std::cout << clrMenu("  Time " + std::to_string(entry.time))
-                  << "\n  Selected: " << clrRunning(entry.pid)
-                  << "\n  Reason:   " << entry.reason
+    for (const auto& e : log)
+        std::cout << clrMenu("  Time " + std::to_string(e.time))
+                  << "\n  Selected: " << clrRunning(e.pid)
+                  << "\n  Reason:   " << e.reason
                   << "\n  " << repeat('-', 34) << "\n";
-    }
     std::cout << "\n";
 }
 
-// ============================================================
-//  Random process generator
-// ============================================================
+// --- Generate random processes for quick testing ---
 inline std::vector<Process> generateRandomProcesses(int count) {
-    // Seed from current time for true randomness each run
     std::mt19937 rng(static_cast<unsigned>(
         std::chrono::steady_clock::now().time_since_epoch().count()));
-
     std::uniform_int_distribution<int> arrDist(0, 10);
     std::uniform_int_distribution<int> burstDist(1, 15);
     std::uniform_int_distribution<int> priDist(1, 10);
 
     std::vector<Process> procs;
     procs.reserve(count);
-
     for (int i = 1; i <= count; i++) {
         Process p;
         p.pid           = "P" + std::to_string(i);
@@ -297,19 +206,11 @@ inline std::vector<Process> generateRandomProcesses(int count) {
     return procs;
 }
 
-// ============================================================
-//  Input validation helpers
-// ============================================================
-
-/// Returns true if `pid` is unique among existing processes.
-inline bool isPIDUnique(const std::string& pid,
-                        const std::vector<Process>& procs) {
+// --- Input helpers ---
+inline bool isPIDUnique(const std::string& pid, const std::vector<Process>& procs) {
     for (const auto& p : procs) if (p.pid == pid) return false;
     return true;
 }
-
-/// Safely read an integer from stdin with a prompt and range check.
-/// Returns false if the user enters non-numeric input.
 inline bool readInt(const std::string& prompt, int& out,
                     int minVal = INT32_MIN, int maxVal = INT32_MAX) {
     std::cout << clrMenu(prompt);
@@ -318,54 +219,34 @@ inline bool readInt(const std::string& prompt, int& out,
     try {
         std::size_t pos;
         int val = std::stoi(line, &pos);
-        if (pos != line.size()) return false; // trailing garbage
-        if (val < minVal || val > maxVal) return false;
-        out = val;
-        return true;
-    } catch (...) {
-        return false;
-    }
+        if (pos != line.size() || val < minVal || val > maxVal) return false;
+        out = val; return true;
+    } catch (...) { return false; }
 }
-
-/// Read a non-empty string (strip leading/trailing spaces).
 inline bool readString(const std::string& prompt, std::string& out) {
     std::cout << clrMenu(prompt);
     if (!std::getline(std::cin, out)) return false;
-    // trim
-    size_t s = out.find_first_not_of(" \t");
-    size_t e = out.find_last_not_of(" \t");
+    size_t s = out.find_first_not_of(" \t"), e = out.find_last_not_of(" \t");
     if (s == std::string::npos) return false;
     out = out.substr(s, e - s + 1);
     return !out.empty();
 }
-
-/// Pause and wait for Enter key.
 inline void pressEnter(const std::string& msg = "Press [Enter] to continue...") {
     std::cout << clrDim("\n  " + msg);
-    std::string dummy;
-    std::getline(std::cin, dummy);
+    std::string dummy; std::getline(std::cin, dummy);
 }
-
-/// Clear the terminal screen.
 inline void clearScreen() {
-    if (g_colorsEnabled)
-        std::cout << ANSI::CLEAR_SCREEN << std::flush;
-    else
-        std::cout << "\n" << repeat('=', 60) << "\n";
+    if (g_colorsEnabled) std::cout << ANSI::CLEAR_SCREEN << std::flush;
+    else                 std::cout << "\n" << repeat('=', 60) << "\n";
 }
 
-// ============================================================
-//  Portable sleep – works on MinGW 6.3 (no std::this_thread)
-//  Uses Windows Sleep() on Windows, nanosleep on POSIX.
-// ============================================================
+// --- Cross-platform sleep ---
 inline void sleepMs(int ms) {
     if (ms <= 0) return;
 #ifdef _WIN32
     Sleep(static_cast<DWORD>(ms));
 #else
-    struct timespec ts;
-    ts.tv_sec  = ms / 1000;
-    ts.tv_nsec = (ms % 1000) * 1000000;
+    struct timespec ts{ ms / 1000, (ms % 1000) * 1000000 };
     nanosleep(&ts, nullptr);
 #endif
 }
